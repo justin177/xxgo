@@ -1,0 +1,133 @@
+#!/bin/bash
+cn=$0
+cn=${cn%/*}'/server_list1'
+
+if [ -f $cn ];then
+  echo "$cn"
+else
+  echo "The file does not exist: '$cn'"
+  echo "Create the file and fill in with server infos."
+  echo "like: [USER@]HOST [-pPORT] [--password=PASSWORD] [//COMMENT]"
+  exit
+fi
+
+function getServerList() {
+#cn="server_list"
+host=$(awk 'BEGIN {
+  count=0;
+} 
+{
+  if ($0!="") {
+    name[count] = $0;count++;
+  }
+};
+END {
+    indexlen = 1;
+    tmp = count;
+    for (i = 0; tmp > 1; i++) {
+      tmp = tmp/10;
+      indexlen = 1+i;
+    }
+    print count,indexlen;
+    for (i = 0; i < count; i++) {
+      #printf "(%0"indexlen"d) %s\n", i, name[i]
+      printf "(%d) %s\n", i, name[i]
+    }
+}' $cn)
+}
+
+getServerList
+# 2017-02-16 support history '-' for last '+' for next
+step=1
+last_host=()
+last_host[$step]=$host
+echo "$host" | sed -E 's/--password=[^ ]*//g' | more
+while read arg
+do
+  # echo "---->$step<----"
+  # echo "++++>${#last_host[@]}<++++"
+  if [ '-' == "$arg" ];then
+    # getServerList
+    if [ "$step" -gt 1 ];then
+      step=`expr $step - 1`
+    fi
+    host=${last_host[$step]}
+  elif [ '+' == "$arg" ];then
+    if [ "$step" -lt "${#last_host[@]}" ];then
+      step=`expr $step + 1`
+    fi
+    host=${last_host[$step]}
+  elif [ '--' == "$arg" ];then
+    exit
+  else
+    # search flow
+    nindex=`echo "$arg" | sed 's/[0-9]//g'`
+    index=`echo "$arg" | sed 's/[^0-9]//g'`
+    result_size=`echo "$host" | grep -c ")"`
+    if [ $result_size -eq 1 ];then
+      result_size=`echo "$host" | grep -c "]"`
+      if [ $result_size -eq 1 ];then
+        if [ -n "$index" -a -z "$nindex" ];then
+          host=`echo "$host" | grep ")"`
+          host=${host#*)}
+          host=`echo "$host" | awk -vofs=$index -F '[][]' '{OFS=ofs;print $1,$3}'`
+          echo "$host" | sed -E 's/--password=[^ ]*//g'
+          break
+        fi
+      else
+        host=`echo "$host" | grep ")"`
+        host=${host#*)}
+        echo "$host" | sed -E 's/--password=[^ ]*//g'
+        break
+      fi
+    else
+      if [ -n "$index" -a -z "$nindex" ];then
+        tmp=`echo "$host" | grep "($arg)"`
+        if [ -n "$tmp" ];then
+          host=$tmp
+        fi
+      else
+      #if [ -n "$arg" ];then
+        tmp=`echo "$host" | grep "$arg"`
+        if [ -n "$tmp" ];then
+          host=$tmp
+        fi
+      fi
+    fi
+    if [ -z "$arg" -o '' == "$arg" ];then
+      # just skip empty input
+      continue
+    fi
+    # record this round's result
+    if [ "${last_host[$step]}" != "$host" ];then
+      step=`expr $step + 1`
+      last_host[$step]=$host
+    fi
+  fi
+  echo "$host" | sed -E 's/--password=[^ ]*//g' | more
+done
+
+echo "+++++++++++++++++++++++"
+
+# remove comment
+host=${host%//*}
+
+# 2017-02-16 support password by using expect
+password=`echo $host | sed -E 's/.*--password=([^ ]*).*/\1/g'`
+host=`echo $host | sed -E 's/--password=[^ ]*//g'`
+# echo "$host"
+# echo "$password"
+if [ -n "$password" -a "$password" != "$host" ];then
+  expect -c "
+  spawn ssh $host
+  expect {
+    yes/no { send yes\r;exp_continue }
+    password: {send $password\r}
+  }
+  interact
+  "
+else
+  ssh $host
+fi
+
+

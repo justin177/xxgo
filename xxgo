@@ -17,7 +17,7 @@ host=$(awk 'BEGIN {
   count=0;
 } 
 {
-  if ($0!="") {
+  if ($0!="" && substr($0,0,1)!="#") {
     name[count] = $0;count++;
   }
 };
